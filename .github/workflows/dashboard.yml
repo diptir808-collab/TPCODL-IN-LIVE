@@ -1,0 +1,73 @@
+name: TPCODL Live Dashboard
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # every 5 minutes — GitHub minimum interval
+  workflow_dispatch:          # also allow manual trigger from GitHub UI
+
+jobs:
+  update-dashboard:
+    runs-on: ubuntu-latest    # 2GB RAM, 2 CPU — Chrome runs perfectly here
+
+    steps:
+      # ── 1. Checkout repo ────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 3. Install Python dependencies ──────────────────────────
+      - name: Install Python packages
+        run: pip install selenium pandas openpyxl xlrd requests
+
+      # ── 4. Install Chrome + ChromeDriver ────────────────────────
+      - name: Install Chrome
+        run: |
+          wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y /tmp/chrome.deb
+          google-chrome --version
+
+      - name: Install ChromeDriver
+        run: |
+          CHROME_VER=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+          echo "Chrome version: $CHROME_VER"
+          wget -q -O /tmp/cd.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chromedriver-linux64.zip"
+          unzip -q /tmp/cd.zip -d /tmp/
+          sudo mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver
+          sudo chmod +x /usr/bin/chromedriver
+          chromedriver --version
+
+      # ── 5. Install Xvfb virtual display ─────────────────────────
+      - name: Install Xvfb
+        run: sudo apt-get install -y xvfb
+
+      # ── 6. Create download directory ────────────────────────────
+      - name: Create directories
+        run: mkdir -p downloads repo
+
+      # ── 7. Run the dashboard script ─────────────────────────────
+      - name: Run dashboard script
+        env:
+          TPCODL_USER:    ${{ secrets.TPCODL_USER }}
+          TPCODL_PASS:    ${{ secrets.TPCODL_PASS }}
+          GITHUB_TOKEN_PAT: ${{ secrets.TOKEN_PAT }}
+          GITHUB_REPO:    ${{ github.repository }}
+          GITHUB_BRANCH:  gh-pages
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1920x1080x24 -ac &
+          sleep 2
+          python run_dashboard.py
+
+      # ── 8. Upload screenshot on failure for debugging ────────────
+      - name: Upload debug screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: downloads/*.png
+          if-no-files-found: ignore
